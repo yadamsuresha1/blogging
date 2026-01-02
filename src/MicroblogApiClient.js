@@ -4,6 +4,19 @@ export default class MicroblogApiClient {
     this.base_url = BASE_API_URL + "/api";
   }
   async request(options) {
+    let response = await this.requestInternal(options);
+    if (response.status === 401 && options.url !== "/tokens") {
+      const refreshResponse = await this.put("/tokens", {
+        access_token: localStorage.getItem("accessToken"),
+      });
+      if (refreshResponse.ok) {
+        localStorage.setItem("accessToken", refreshResponse.body.access_token);
+        response = await this.requestInternal(options);
+      }
+    }
+    return response;
+  }
+  async requestInternal(options) {
     console.log("options", options);
     let query = new URLSearchParams(options.query || {}).toString();
     console.log("query", query);
@@ -16,8 +29,10 @@ export default class MicroblogApiClient {
         method: options.method,
         headers: {
           "Content-Type": "application/json",
+          Authorization: "Bearer " + localStorage.getItem("accessToken"),
           ...options.headers,
         },
+        credentials: options.url === "/tokens" ? "include" : "omit",
         body: options.body ? JSON.stringify(options.body) : null,
       });
     } catch (error) {
@@ -53,5 +68,24 @@ export default class MicroblogApiClient {
 
   async delete(url, options) {
     return this.request({ method: "DELETE", url, ...options });
+  }
+  async login(username, password) {
+    const response = await this.post("/tokens", null, {
+      headers: {
+        Authorization: "Basic " + btoa(username + ":" + password),
+      },
+    });
+    if (!response.ok) {
+      return response.status === 401 ? "fail" : "error";
+    }
+    localStorage.setItem("accessToken", response.body.access_token);
+    return "ok";
+  }
+  async logout() {
+    await this.delete("/tokens");
+    localStorage.removeItem("accessToken");
+  }
+  isAuthenticated() {
+    return localStorage.getItem("accessToken") !== null;
   }
 }
